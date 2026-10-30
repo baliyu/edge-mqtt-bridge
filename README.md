@@ -1,2 +1,72 @@
 # edge-mqtt-bridge
 
+[![CI](https://github.com/baliyu/edge-mqtt-bridge/actions/workflows/ci.yml/badge.svg)](https://github.com/baliyu/edge-mqtt-bridge/actions/workflows/ci.yml)
+
+A small, tested bridge from a serial port to an MQTT broker. It reads the one-line-per-window output of the SparkFun Edge's microphone
+logger (from my [tinyml-edge-lab](https://github.com/baliyu/tinyml-edge-lab) repository), checks each line, and publishes it as a JSON message with an
+online/offline status, a retained info message and periodic counters. A second command subscribes and checks that what arrives matches
+the documented format. The topics and the message format are in [docs/PROTOCOL.md](docs/PROTOCOL.md).
+
+Built with AI assistance (Claude). I chose the design, ran it on my own hardware and checked the results; the code and tests were written with Claude.
+
+## Status, stated plainly
+
+- Tested with a fake serial port and a fake MQTT client, and against a **real Mosquitto broker** (the integration tests start one on a private port and are skipped if Mosquitto is not installed). CI runs both.
+- The tests were checked by breaking the code on purpose: 12 deliberate bugs, each caught.
+- Run against a real board: yes, in two short runs (below). They show it works; they are not a long-run test.
+- **No authentication and no TLS yet.** It talks to a broker on `localhost` only. Do not point it at a broker on a network you do not control until that is done (it is the next step, below).
+- One device, one message format. No cloud, no database, no dashboard.
+
+## Quick start
+
+```
+pip install -e .[dev]
+pytest -q
+```
+
+A local broker (Ubuntu or WSL): `sudo apt install mosquitto mosquitto-clients`. Then, with the Edge on a serial port:
+
+```
+python -m edge_mqtt_bridge run --serial-port COM4            # Windows; /dev/ttyUSB0 on Linux
+python -m edge_mqtt_bridge check --count 40                  # in another window: subscribe and check the format
+mosquitto_sub -t "edge/#" -v                                 # or just watch the messages
+```
+
+Stop the bridge with Ctrl+C: it publishes `offline` (retained) before it exits. If it is killed instead, the broker publishes `offline` itself (the MQTT last will; there is a test for that).
+
+## Run on a real board
+
+One SparkFun Edge running the mic_logger firmware, on a Windows 11 laptop; the broker was Mosquitto 2.0.18 in WSL2 on the same laptop, reached from the bridge on Windows as `localhost`. Two short runs on 30 October 2026:
+
+| Run | What happened |
+|---|---|
+| 1 | 69 windows read and published; 0 duplicates, 0 restarts, 0 stale or bad lines, 0 publish failures. `status` went `online`, then `offline` (retained) after Ctrl+C. The 69 messages arrived about 0.254 s apart on average, which is the board's own window rate (2000 samples at about 7878 Hz), so the bridge showed no visible delay in the stream |
+| 2 | The bridge accepted 159 windows (1 stale line dropped: the bytes Windows hands over when a port is opened; 0 bad lines, 0 publish failures). `check` read 81 of the messages in another window and found 0 problems and 0 board restarts |
+
+Not measured: end-to-end latency, behaviour over hours, behaviour when the broker is stopped or restarted mid-run, or a second device.
+
+## What is where
+
+| Path | What it is |
+|---|---|
+| `src/edge_mqtt_bridge/parse.py` | Which serial lines are real windows: stale bytes, repeats, restarts, impossible values |
+| `src/edge_mqtt_bridge/bridge.py` | The bridge and the paho-mqtt publisher (last will, online message after every reconnect) |
+| `src/edge_mqtt_bridge/check.py` | The message checker (format, repeats, gaps, restarts) |
+| `docs/PROTOCOL.md` | Topics, QoS, retained flags and every field |
+| `tests/` | Unit tests with fakes, and integration tests against a real broker |
+
+## Limits
+
+- The message time `t` is the PC's clock at receipt, not the time of the sound.
+- Messages published while the broker is unreachable are not queued by this program. `publish_failures` counts them.
+- Only the microphone logger's line format is understood.
+
+## Next
+
+1. Username and password, per-topic permissions and TLS, each tested.
+2. A second device and a second line format (the gesture demo).
+3. Measured latency and message rate on a real board.
+
+## Licence
+
+MIT.

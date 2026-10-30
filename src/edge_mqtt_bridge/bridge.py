@@ -97,12 +97,15 @@ class PahoPublisher:
     announces_online = True          # it publishes 'online' itself on every (re)connect, so the Bridge need not
 
     def __init__(self, host: str, port: int, client_id: str, status_topic: str, username: Optional[str] = None,
-                 password: Optional[str] = None):
+                 password: Optional[str] = None, tls_ca: Optional[str] = None):
         import paho.mqtt.client as mqtt
         self._mqtt = mqtt
         self.client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, client_id=client_id, protocol=mqtt.MQTTv5)   # v5: the broker then says when it refuses
         if username:
             self.client.username_pw_set(username, password)
+        if tls_ca:
+            from .tls import make_context
+            self.client.tls_set_context(make_context(tls_ca))
         self.client.will_set(status_topic, "offline", qos=1, retain=True)
         self._status_topic = status_topic
         self.client.on_connect = self._on_connect
@@ -137,7 +140,10 @@ class PahoPublisher:
         return self.online_accepted
 
     def connect(self, timeout: float = 10.0) -> None:
-        self.client.connect(self.host, self.port, keepalive=30)
+        try:
+            self.client.connect(self.host, self.port, keepalive=30)
+        except OSError as e:          # includes ssl.SSLError: an untrusted certificate, a name that does not match, a refused port
+            raise ConnectionError(f"could not connect to MQTT broker at {self.host}:{self.port} ({e})") from e
         self.client.loop_start()
         end = time.monotonic() + timeout
         while not self.connected and time.monotonic() < end:

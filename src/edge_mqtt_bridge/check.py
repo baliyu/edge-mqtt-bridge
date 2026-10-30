@@ -54,21 +54,25 @@ class StreamChecker:
         self._last[dev] = w
 
 
-def run_check(host: str, port: int, topic: str, count: int, timeout: float, username=None, password=None):
+def run_check(host: str, port: int, topic: str, count: int, timeout: float, username=None, password=None, tls_ca=None):
     """Subscribe to `topic` and check up to `count` messages. Returns (StreamChecker, error), where error is None, or says why
     nothing could be checked (refused connection, refused subscription, no broker)."""
     import time
 
     import paho.mqtt.client as mqtt
-    checker, state = StreamChecker(), {"done": False, "error": None}
+    checker, state = StreamChecker(), {"done": False, "error": None, "connected": False}
     client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, client_id="edge-mqtt-check", protocol=mqtt.MQTTv5)
     if username:
         client.username_pw_set(username, password)
+    if tls_ca:
+        from .tls import make_context
+        client.tls_set_context(make_context(tls_ca))
 
     def on_connect(c, u, f, rc, p):
         if rc.is_failure:
             state["error"], state["done"] = f"the broker refused the connection ({rc})", True
         else:
+            state["connected"] = True
             c.subscribe(topic, qos=0)
 
     def on_subscribe(c, u, mid, reason_codes, p):
@@ -91,4 +95,7 @@ def run_check(host: str, port: int, topic: str, count: int, timeout: float, user
         time.sleep(0.05)
     client.loop_stop()
     client.disconnect()
+    if not state["connected"] and state["error"] is None:
+        state["error"] = (f"never got an MQTT session with {host}:{port}. If that port expects TLS, pass --mqtt-tls-ca with the broker's "
+                          f"certificate authority; otherwise check the host, the port and that the broker is running")
     return checker, state["error"]

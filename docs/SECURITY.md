@@ -12,6 +12,8 @@ This is a small bridge, and this page is a statement of its limits as much as of
 | A reader forges or changes data | the `reader` user can only **read** | a publish by the reader never reaches another subscriber |
 | The password leaks through the command line or the shell history | the password is read from an environment variable only; there is **no** password argument, and argument abbreviation is switched off so `--mqtt-password` is an error | two tests; breaking either is caught |
 | A wrong permission makes the bridge look healthy while nothing arrives | at start-up the bridge checks that the broker accepted its first (QoS 1) message, and stops with a clear error if not. **Limit:** afterwards, refused QoS 0 measurements get no reply and are dropped silently; `publish_rejected` counts only refused QoS 1 messages | an integration test (refused for another device, accepted for its own); the QoS 0 limit has its own test; and it was seen on the real broker (below) |
+| Someone reads or alters the traffic on the network | **TLS (optional, `--mqtt-tls-ca`):** the bridge checks the broker's certificate, checks that its name matches, trusts **only** the authority file you name (not the system's list), and refuses anything older than TLS 1.2 | a real broker with certificates made by `docs/make-certs.sh`: the connection uses TLS 1.2 or newer (read from the live socket); an untrusted authority, a certificate for another hostname and a plain client on the TLS port are each refused; users and permissions still apply over TLS |
+| A password sent in the clear to another machine by mistake | the bridge warns when a password would travel without TLS to any host except localhost | a unit test |
 | A crashed bridge looks alive | the last will publishes `offline` (retained) | a test kills the connection and waits for `offline` |
 
 The permission file that the tests load is the same file that is documented (`docs/mosquitto-acl.example`), so the two cannot drift apart.
@@ -21,12 +23,14 @@ The permission file that the tests load is the same file that is documented (`do
 - Mosquitto's ACL file does **not** refuse a subscription to a topic you may not read: it accepts it and delivers nothing, with no error. The `check` command therefore says "no messages arrived" and names both possible causes (bridge not running, or no permission).
 - A publish to a topic the user may not write is reported to the client only if the client speaks **MQTT 5 and the publish is QoS 1 or 2**. A QoS 0 publish gets no reply in any version, so the broker can drop it and the client can never know.
 - **Found on the real broker, not by the automated tests.** Run as `--device other-device`, the bridge read 132 windows and was told about 2 refusals (the two QoS 1 status messages); about 130 measurements were dropped silently, and it ran for 33 seconds looking healthy. The start-up check was added because of this.
+- A checker that is not given the authority file for a TLS port connects at the network level but never gets an MQTT session. My first version then said "no messages arrived: is the bridge running?", which blames the wrong thing. A test caught it; it now says it never got a session and suggests `--mqtt-tls-ca`.
 - On the same run the serial port handed over a stale block of 2,384 identical lines; the line filter dropped all of them (`duplicates 2384`), so nothing would have been published twice.
 - Two clients with the same client ID disconnect each other. One of my own tests was vacuous for that reason until a deliberate-bug check exposed it.
 
 ## Not protected yet
 
-- **No encryption.** Passwords and messages cross the network as plain text. Anyone who can see the traffic can read and change it. **Keep the broker on `127.0.0.1`** until TLS is added (next stage).
+- **TLS is optional and one-sided.** Without `--mqtt-tls-ca` nothing is encrypted, so keep the broker on `127.0.0.1` in that case. With it, the bridge verifies the broker, but the broker does not verify the bridge by certificate: a password is still the only client credential (no mutual TLS).
+- **Certificates.** The sample certificates are private ones for `localhost`. The authority's private key (`ca.key`) can sign a certificate for anything the bridge trusts, so it must stay off the broker and out of git. Certificates expire (365 days by default) and there is no revocation. The sample broker configuration does not restrict which TLS versions the broker accepts; the bridge refuses anything older than 1.2 on its side.
 - **No per-message authenticity.** A host that holds the `bridge` password can publish anything under `edge/edge-1/`.
 - **No rate limits or connection limits** are configured on the broker, so it is not hardened against a flood.
 - **Shared secrets in a file.** The password reaches the process through an environment variable, so anything that can read that process's environment can read it. The broker's password file is hashed by `mosquitto_passwd`, and should be readable only by the broker's user.
@@ -66,6 +70,26 @@ py -m edge_mqtt_bridge check --mqtt-user reader
 ```
 
 Choose passwords of 12 or more random characters. The first test run of this setup used short ones, which is acceptable only because the broker listens on `127.0.0.1`.
+
+## Turning TLS on (Ubuntu or WSL for the broker; the bridge can run anywhere that can read `ca.crt`)
+
+```
+bash docs/make-certs.sh certs                                   # ca.crt, server.crt, server.key, ca.key in ./certs
+sudo mkdir -p /etc/mosquitto/certs
+sudo cp certs/ca.crt certs/server.crt certs/server.key /etc/mosquitto/certs/       # NOT ca.key
+sudo chown root:mosquitto /etc/mosquitto/certs/server.key && sudo chmod 640 /etc/mosquitto/certs/server.key
+sudo cp docs/mosquitto-tls.conf /etc/mosquitto/conf.d/edge.conf                      # replaces the plain-text listener
+sudo service mosquitto restart && systemctl is-active mosquitto
+```
+
+Copy only `ca.crt` to the machine that runs the bridge (the authority's public certificate), then:
+
+```
+py -m edge_mqtt_bridge run --serial-port COM4 --mqtt-user bridge --mqtt-port 8883 --mqtt-tls-ca C:\path\to\ca.crt
+py -m edge_mqtt_bridge check --mqtt-user reader --mqtt-port 8883 --mqtt-tls-ca C:\path\to\ca.crt
+```
+
+`ca.key` is the one file that must never leave a safe place: with it anyone can make a certificate the bridge will trust.
 
 ## A mistake of mine, kept here on purpose
 

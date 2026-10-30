@@ -12,10 +12,10 @@ Built with AI assistance (Claude). I chose the design, ran it on my own hardware
 ## Status, stated plainly
 
 - Tested with a fake serial port and a fake MQTT client, and against a **real Mosquitto broker** (the integration tests start one on a private port and are skipped if Mosquitto is not installed). CI runs both.
-- The tests were checked by breaking the code on purpose: 12 deliberate bugs in the bridge and 8 in the security behaviour, each caught. One of my own security tests turned out to be vacuous (two clients shared an ID) until that check exposed it; it is fixed.
+- The tests were checked by breaking the code on purpose: 12 deliberate bugs in the bridge, 8 in the security behaviour and 10 in the TLS behaviour, each caught. One of my own security tests turned out to be vacuous (two clients shared an ID) until that check exposed it; it is fixed.
 - Run against a real board: yes, in four short runs (below). They show it works; they are not a long-run test.
 - **Users, passwords and per-topic permissions are supported and tested against a real broker** (see [docs/SECURITY.md](docs/SECURITY.md)): the bridge user can write only its own device's topics, a reader can only read, and at start-up the bridge stops with a clear error if the broker refuses its first message.
-- **No TLS yet.** Passwords and messages cross the network as plain text, so keep the broker on `127.0.0.1` until TLS is added (the next step, below).
+- **TLS is supported and tested against a real broker** (`--mqtt-tls-ca`): the bridge checks the broker's certificate and name, trusts only the authority you name, and refuses TLS older than 1.2. It is optional: without it nothing is encrypted, so keep the broker on `127.0.0.1`. It has **not yet been run on the real board**. No client certificates (the password is the only client credential).
 - One device, one message format. No cloud, no database, no dashboard.
 
 ## Quick start
@@ -55,9 +55,10 @@ Not measured: end-to-end latency, behaviour over hours, behaviour when the broke
 | `src/edge_mqtt_bridge/parse.py` | Which serial lines are real windows: stale bytes, repeats, restarts, impossible values |
 | `src/edge_mqtt_bridge/bridge.py` | The bridge and the paho-mqtt publisher (last will, online message after every reconnect) |
 | `src/edge_mqtt_bridge/check.py` | The message checker (format, repeats, gaps, restarts) |
+| `src/edge_mqtt_bridge/tls.py` | The TLS client settings: one trusted authority, a name check, TLS 1.2 or newer, and the plaintext-password warning |
 | `docs/PROTOCOL.md` | Topics, QoS, retained flags and every field |
 | `docs/SECURITY.md` | What is protected, how it is tested, what is not; how to set up users and permissions |
-| `docs/mosquitto-acl.example`, `docs/mosquitto-secure.conf` | The permission file (the tests load this very file) and a broker configuration |
+| `docs/mosquitto-acl.example`, `docs/mosquitto-secure.conf`, `docs/mosquitto-tls.conf`, `docs/make-certs.sh` | The permission file (the tests load this very file), broker configurations with and without TLS, and the script that makes the certificates (the tests run it too) |
 | `tests/` | Unit tests with fakes, and integration tests against a real broker |
 
 ## Limits
@@ -68,9 +69,8 @@ Not measured: end-to-end latency, behaviour over hours, behaviour when the broke
 
 ## Next
 
-1. TLS (a certificate authority, a server certificate, and a client that checks it), tested the same way.
-2. A second device and a second line format (the gesture demo).
-3. Measured latency and message rate on a real board.
+1. A second device and a second line format (the gesture demo).
+2. Measured latency and message rate on a real board.
 
 ## Licence
 

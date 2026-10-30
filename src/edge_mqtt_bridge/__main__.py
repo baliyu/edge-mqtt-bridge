@@ -28,6 +28,7 @@ def add_broker_arguments(p) -> None:
     p.add_argument("--mqtt-port", type=int, default=1883)
     p.add_argument("--mqtt-user", default=None, help="broker user name (the password is read from the environment)")
     p.add_argument("--mqtt-password-env", default="EDGE_MQTT_PASSWORD", help="name of the environment variable holding the password")
+    p.add_argument("--mqtt-tls-ca", default=None, help="certificate authority file (PEM) that signed the broker's certificate: turns TLS on")
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -56,6 +57,17 @@ def final_summary(bridge) -> str:
             f"publish failures {bridge.publish_failures}, refused by the broker {getattr(bridge.pub, 'rejected', 0)}")
 
 
+def tls_problem(a):
+    """A message if the TLS options cannot work (a missing file), and prints the plaintext-password warning when it applies."""
+    from .tls import plaintext_warning
+    if a.mqtt_tls_ca and not os.path.isfile(a.mqtt_tls_ca):
+        return f"the certificate authority file {a.mqtt_tls_ca!r} does not exist"
+    warning = plaintext_warning(a.mqtt_host, a.mqtt_user, a.mqtt_tls_ca)
+    if warning:
+        print(warning, file=sys.stderr)
+    return None
+
+
 def cmd_run(a) -> int:
     try:
         import serial
@@ -64,7 +76,12 @@ def cmd_run(a) -> int:
         return 2
     t = br.topics(a.prefix, a.device)
     user, password = resolve_credentials(a.mqtt_user, a.mqtt_password_env)
-    pub = br.PahoPublisher(a.mqtt_host, a.mqtt_port, f"edge-mqtt-bridge-{a.device}", t["status"], username=user, password=password)
+    problem = tls_problem(a)
+    if problem:
+        print(problem, file=sys.stderr)
+        return 2
+    pub = br.PahoPublisher(a.mqtt_host, a.mqtt_port, f"edge-mqtt-bridge-{a.device}", t["status"], username=user, password=password,
+                           tls_ca=a.mqtt_tls_ca)
     try:
         pub.connect()
     except ConnectionError as e:
@@ -98,7 +115,11 @@ def cmd_run(a) -> int:
 def cmd_check(a) -> int:
     user, password = resolve_credentials(a.mqtt_user, a.mqtt_password_env)
     topic = f"{a.prefix}/{a.device}/mic"
-    checker, error = run_check(a.mqtt_host, a.mqtt_port, topic, a.count, a.timeout, user, password)
+    problem = tls_problem(a)
+    if problem:
+        print(problem, file=sys.stderr)
+        return 2
+    checker, error = run_check(a.mqtt_host, a.mqtt_port, topic, a.count, a.timeout, user, password, tls_ca=a.mqtt_tls_ca)
     if error:
         print(error, file=sys.stderr)
         return 1

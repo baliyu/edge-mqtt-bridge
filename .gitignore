@@ -5,3 +5,9 @@ __pycache__/
 .venv/
 build/
 dist/
+
+# TLS material: never commit it
+certs/
+*.key
+*.pem
+*.srl

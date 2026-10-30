@@ -12,9 +12,10 @@ Built with AI assistance (Claude). I chose the design, ran it on my own hardware
 ## Status, stated plainly
 
 - Tested with a fake serial port and a fake MQTT client, and against a **real Mosquitto broker** (the integration tests start one on a private port and are skipped if Mosquitto is not installed). CI runs both.
-- The tests were checked by breaking the code on purpose: 12 deliberate bugs, each caught.
+- The tests were checked by breaking the code on purpose: 12 deliberate bugs in the bridge and 6 in the security behaviour, each caught. One of my own security tests turned out to be vacuous (two clients shared an ID) until that check exposed it; it is fixed.
 - Run against a real board: yes, in two short runs (below). They show it works; they are not a long-run test.
-- **No authentication and no TLS yet.** It talks to a broker on `localhost` only. Do not point it at a broker on a network you do not control until that is done (it is the next step, below).
+- **Users, passwords and per-topic permissions are supported and tested against a real broker** (see [docs/SECURITY.md](docs/SECURITY.md)): the bridge user can write only its own device's topics, a reader can only read, and the bridge counts the publishes the broker refuses.
+- **No TLS yet.** Passwords and messages cross the network as plain text, so keep the broker on `127.0.0.1` until TLS is added (the next step, below).
 - One device, one message format. No cloud, no database, no dashboard.
 
 ## Quick start
@@ -27,7 +28,7 @@ pytest -q
 A local broker (Ubuntu or WSL): `sudo apt install mosquitto mosquitto-clients`. Then, with the Edge on a serial port:
 
 ```
-python -m edge_mqtt_bridge run --serial-port COM4            # Windows; /dev/ttyUSB0 on Linux
+python -m edge_mqtt_bridge run --serial-port COM4            # Windows; /dev/ttyUSB0 on Linux. With broker users: add --mqtt-user bridge, and put the password in the EDGE_MQTT_PASSWORD environment variable (never on the command line)
 python -m edge_mqtt_bridge check --count 40                  # in another window: subscribe and check the format
 mosquitto_sub -t "edge/#" -v                                 # or just watch the messages
 ```
@@ -53,6 +54,8 @@ Not measured: end-to-end latency, behaviour over hours, behaviour when the broke
 | `src/edge_mqtt_bridge/bridge.py` | The bridge and the paho-mqtt publisher (last will, online message after every reconnect) |
 | `src/edge_mqtt_bridge/check.py` | The message checker (format, repeats, gaps, restarts) |
 | `docs/PROTOCOL.md` | Topics, QoS, retained flags and every field |
+| `docs/SECURITY.md` | What is protected, how it is tested, what is not; how to set up users and permissions |
+| `docs/mosquitto-acl.example`, `docs/mosquitto-secure.conf` | The permission file (the tests load this very file) and a broker configuration |
 | `tests/` | Unit tests with fakes, and integration tests against a real broker |
 
 ## Limits
@@ -63,7 +66,7 @@ Not measured: end-to-end latency, behaviour over hours, behaviour when the broke
 
 ## Next
 
-1. Username and password, per-topic permissions and TLS, each tested.
+1. TLS (a certificate authority, a server certificate, and a client that checks it), tested the same way.
 2. A second device and a second line format (the gesture demo).
 3. Measured latency and message rate on a real board.
 

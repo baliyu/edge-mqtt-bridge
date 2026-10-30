@@ -2,30 +2,48 @@
 from __future__ import annotations
 
 import argparse
+import os
 import signal
 import sys
 import time
 
 from . import bridge as br
-from .check import StreamChecker
+from .check import run_check
+
+
+def resolve_credentials(user, env_name, environ=None):
+    """(user, password) for the broker, or (None, None) when no user is given. The password comes from an environment variable and
+    is never accepted on the command line, where it would show in the process list and the shell history."""
+    environ = os.environ if environ is None else environ
+    if not user:
+        return None, None
+    password = environ.get(env_name)
+    if not password:
+        raise SystemExit(f"--mqtt-user {user!r} needs its password in the environment variable {env_name}")
+    return user, password
+
+
+def add_broker_arguments(p) -> None:
+    p.add_argument("--mqtt-host", default="localhost")
+    p.add_argument("--mqtt-port", type=int, default=1883)
+    p.add_argument("--mqtt-user", default=None, help="broker user name (the password is read from the environment)")
+    p.add_argument("--mqtt-password-env", default="EDGE_MQTT_PASSWORD", help="name of the environment variable holding the password")
 
 
 def build_parser() -> argparse.ArgumentParser:
-    ap = argparse.ArgumentParser(prog="edge_mqtt_bridge", description=__doc__)
+    ap = argparse.ArgumentParser(prog="edge_mqtt_bridge", description=__doc__, allow_abbrev=False)
     sub = ap.add_subparsers(dest="cmd", required=True)
-    r = sub.add_parser("run", help="read the Edge's serial port and publish to MQTT")
+    r = sub.add_parser("run", help="read the Edge's serial port and publish to MQTT", allow_abbrev=False)
     r.add_argument("--serial-port", required=True, help="for example COM4")
     r.add_argument("--baud", type=int, default=115200)
     r.add_argument("--device", default="edge-1", help="device name used in the topics")
     r.add_argument("--prefix", default="edge")
-    r.add_argument("--mqtt-host", default="localhost")
-    r.add_argument("--mqtt-port", type=int, default=1883)
+    add_broker_arguments(r)
     r.add_argument("--stats-every", type=float, default=10.0, help="seconds between stats messages")
-    c = sub.add_parser("check", help="subscribe and check the messages against docs/PROTOCOL.md")
+    c = sub.add_parser("check", help="subscribe and check the messages against docs/PROTOCOL.md", allow_abbrev=False)
     c.add_argument("--device", default="+", help="device name, or + for all")
     c.add_argument("--prefix", default="edge")
-    c.add_argument("--mqtt-host", default="localhost")
-    c.add_argument("--mqtt-port", type=int, default=1883)
+    add_broker_arguments(c)
     c.add_argument("--count", type=int, default=40, help="stop after this many messages")
     c.add_argument("--timeout", type=float, default=30.0, help="stop after this many seconds")
     return ap
@@ -38,7 +56,8 @@ def cmd_run(a) -> int:
         print("pyserial is missing: pip install pyserial", file=sys.stderr)
         return 2
     t = br.topics(a.prefix, a.device)
-    pub = br.PahoPublisher(a.mqtt_host, a.mqtt_port, f"edge-mqtt-bridge-{a.device}", t["status"])
+    user, password = resolve_credentials(a.mqtt_user, a.mqtt_password_env)
+    pub = br.PahoPublisher(a.mqtt_host, a.mqtt_port, f"edge-mqtt-bridge-{a.device}", t["status"], username=user, password=password)
     try:
         pub.connect()
     except ConnectionError as e:
@@ -66,31 +85,16 @@ def cmd_run(a) -> int:
 
 
 def cmd_check(a) -> int:
-    import paho.mqtt.client as mqtt
-    checker, done = StreamChecker(), {"flag": False}
-    client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, client_id="edge-mqtt-check")
+    user, password = resolve_credentials(a.mqtt_user, a.mqtt_password_env)
     topic = f"{a.prefix}/{a.device}/mic"
-
-    def on_connect(c, u, f, rc, p):
-        c.subscribe(topic, qos=0)
-
-    def on_message(c, u, msg):
-        checker.feed(msg.payload.decode("utf-8", errors="replace"))
-        if checker.count >= a.count:
-            done["flag"] = True
-
-    client.on_connect, client.on_message = on_connect, on_message
-    try:
-        client.connect(a.mqtt_host, a.mqtt_port, keepalive=30)
-    except OSError as e:
-        print(f"could not connect: {e}", file=sys.stderr)
+    checker, error = run_check(a.mqtt_host, a.mqtt_port, topic, a.count, a.timeout, user, password)
+    if error:
+        print(error, file=sys.stderr)
         return 1
-    client.loop_start()
-    end = time.monotonic() + a.timeout
-    while not done["flag"] and time.monotonic() < end:
-        time.sleep(0.1)
-    client.loop_stop()
-    client.disconnect()
+    if checker.count == 0:
+        print(f"No messages arrived on {topic} within {a.timeout:.0f} s. Is the bridge running? A broker with an access list also "
+              f"delivers nothing, without any error, to a user who has no permission to read the topic.", file=sys.stderr)
+        return 1
     print(f"Checked {checker.count} messages on {topic}; board restarts seen {checker.restarts}; problems {len(checker.problems)}")
     for p in checker.problems[:20]:
         print("  - " + p)

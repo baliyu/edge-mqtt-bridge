@@ -71,7 +71,8 @@ class Bridge:
         c = self.filter.counters
         self._send(self.t["stats"], {"v": SCHEMA_VERSION, "device": self.device, "received": c.received, "accepted": c.accepted,
                                      "duplicates": c.duplicates, "restarts": c.restarts, "stale_lines": c.stale,
-                                     "bad_lines": c.bad, "publish_failures": self.publish_failures})
+                                     "bad_lines": c.bad, "publish_failures": self.publish_failures,
+                                     "publish_rejected": getattr(self.pub, "rejected", 0)})
         self._last_stats = self._mono()
 
     def run(self, lines, should_stop: Callable[[], bool] = lambda: False) -> None:
@@ -99,19 +100,27 @@ class PahoPublisher:
                  password: Optional[str] = None):
         import paho.mqtt.client as mqtt
         self._mqtt = mqtt
-        self.client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, client_id=client_id)
+        self.client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, client_id=client_id, protocol=mqtt.MQTTv5)   # v5: the broker then says when it refuses
         if username:
             self.client.username_pw_set(username, password)
         self.client.will_set(status_topic, "offline", qos=1, retain=True)
         self._status_topic = status_topic
         self.client.on_connect = self._on_connect
+        self.client.on_publish = self._on_publish
         self.host, self.port = host, port
         self.connected = False
+        self.last_reason = ""
+        self.rejected = 0            # publishes the broker refused (for example no permission for that topic)
 
     def _on_connect(self, client, userdata, flags, reason_code, properties):
         self.connected = not reason_code.is_failure
+        self.last_reason = str(reason_code)
         if self.connected:
             client.publish(self._status_topic, "online", qos=1, retain=True)
+
+    def _on_publish(self, client, userdata, mid, reason_code, properties):
+        if reason_code.is_failure:
+            self.rejected += 1
 
     def connect(self, timeout: float = 10.0) -> None:
         self.client.connect(self.host, self.port, keepalive=30)
@@ -120,7 +129,9 @@ class PahoPublisher:
         while not self.connected and time.monotonic() < end:
             time.sleep(0.05)
         if not self.connected:
-            raise ConnectionError(f"could not connect to MQTT broker at {self.host}:{self.port}")
+            why = f" ({self.last_reason})" if self.last_reason else ""
+            self.client.loop_stop()
+            raise ConnectionError(f"could not connect to MQTT broker at {self.host}:{self.port}{why}")
 
     def publish(self, topic: str, payload: str, qos: int = 0, retain: bool = False) -> bool:
         info = self.client.publish(topic, payload, qos=qos, retain=retain)

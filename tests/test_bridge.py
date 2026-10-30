@@ -86,3 +86,15 @@ def test_the_bridge_says_online_unless_the_publisher_already_does(clock):
         make(pub, clock).start()
     assert quiet.on("/status") == []
     assert [m["payload"] for m in plain.on("/status")] == ["online"]
+
+
+def test_refused_publishes_are_reported_in_the_stats_when_the_publisher_counts_them(clock):
+    class Counting(FakePublisher):
+        rejected = 3
+    pub = Counting()
+    b = make(pub, clock)
+    b.stop()
+    assert json.loads(pub.on("/stats")[-1]["payload"])["publish_rejected"] == 3
+    plain = FakePublisher()
+    make(plain, clock).stop()
+    assert json.loads(plain.on("/stats")[-1]["payload"])["publish_rejected"] == 0

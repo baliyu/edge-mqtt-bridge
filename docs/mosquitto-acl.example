@@ -1,0 +1,12 @@
+# Per-topic permissions for a Mosquitto broker. tests/test_integration_auth.py loads this very file, so what is documented is what is tested.
+#
+# bridge: may write only the topics of device edge-1 (its measurements, status, info and stats). It cannot read anything.
+user bridge
+topic write edge/edge-1/#
+
+# reader: may read the four topic kinds of any device and cannot publish at all.
+user reader
+topic read edge/+/mic
+topic read edge/+/status
+topic read edge/+/info
+topic read edge/+/stats

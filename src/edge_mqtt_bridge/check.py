@@ -52,3 +52,43 @@ class StreamChecker:
             elif w > last + 1:
                 self.problems.append(f"message {self.count}: windows {last + 1} to {w - 1} did not arrive")
         self._last[dev] = w
+
+
+def run_check(host: str, port: int, topic: str, count: int, timeout: float, username=None, password=None):
+    """Subscribe to `topic` and check up to `count` messages. Returns (StreamChecker, error), where error is None, or says why
+    nothing could be checked (refused connection, refused subscription, no broker)."""
+    import time
+
+    import paho.mqtt.client as mqtt
+    checker, state = StreamChecker(), {"done": False, "error": None}
+    client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, client_id="edge-mqtt-check", protocol=mqtt.MQTTv5)
+    if username:
+        client.username_pw_set(username, password)
+
+    def on_connect(c, u, f, rc, p):
+        if rc.is_failure:
+            state["error"], state["done"] = f"the broker refused the connection ({rc})", True
+        else:
+            c.subscribe(topic, qos=0)
+
+    def on_subscribe(c, u, mid, reason_codes, p):
+        if any(r.is_failure for r in reason_codes):
+            state["error"], state["done"] = f"the broker refused the subscription to {topic}", True
+
+    def on_message(c, u, msg):
+        checker.feed(msg.payload.decode("utf-8", errors="replace"))
+        if checker.count >= count:
+            state["done"] = True
+
+    client.on_connect, client.on_subscribe, client.on_message = on_connect, on_subscribe, on_message
+    try:
+        client.connect(host, port, keepalive=30)
+    except OSError as e:
+        return checker, f"could not connect: {e}"
+    client.loop_start()
+    end = time.monotonic() + timeout
+    while not state["done"] and time.monotonic() < end:
+        time.sleep(0.05)
+    client.loop_stop()
+    client.disconnect()
+    return checker, state["error"]

@@ -38,8 +38,9 @@ understands; `edge_mqtt_bridge check` rejects unknown fields so that a change is
 ## `stats` message
 
 ```json
-{"v":1,"device":"edge-1","received":120,"accepted":118,"duplicates":2,"restarts":0,"stale_lines":4,"bad_lines":1,"publish_failures":0}
+{"v":1,"device":"edge-1","received":120,"accepted":118,"duplicates":2,"restarts":0,"stale_lines":4,"bad_lines":1,"publish_failures":0,"publish_rejected":0}
 ```
 
 `received` counts readable window lines including repeats; `accepted` those passed on; `publish_failures` the publishes the MQTT
-library refused. All counts are since the bridge started.
+library refused, and `publish_rejected` the publishes the **broker** refused afterwards (for example, the bridge's user has no permission
+for that topic). A rising `publish_rejected` means data is being lost. All counts are since the bridge started.

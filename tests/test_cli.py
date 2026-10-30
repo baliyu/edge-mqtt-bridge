@@ -29,3 +29,19 @@ def test_there_is_no_password_argument_on_the_command_line():
     assert not hasattr(help_text, "mqtt_password")
     with pytest.raises(SystemExit):
         build_parser().parse_args(["run", "--serial-port", "COM4", "--mqtt-password", "secret"])
+
+
+def test_the_final_summary_names_what_the_broker_refused():
+    from edge_mqtt_bridge.__main__ import final_summary
+    from edge_mqtt_bridge.bridge import Bridge
+
+    class Pub:
+        rejected = 4
+        def publish(self, topic, payload, qos=0, retain=False):
+            return True
+    text = final_summary(Bridge(Pub()))
+    assert text.startswith("Stopped.") and "refused by the broker 4" in text
+    class Plain:
+        def publish(self, topic, payload, qos=0, retain=False):
+            return True
+    assert "refused by the broker 0" in final_summary(Bridge(Plain()))

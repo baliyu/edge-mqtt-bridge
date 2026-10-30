@@ -42,5 +42,6 @@ understands; `edge_mqtt_bridge check` rejects unknown fields so that a change is
 ```
 
 `received` counts readable window lines including repeats; `accepted` those passed on; `publish_failures` the publishes the MQTT
-library refused, and `publish_rejected` the publishes the **broker** refused afterwards (for example, the bridge's user has no permission
-for that topic). A rising `publish_rejected` means data is being lost. All counts are since the bridge started.
+library refused, and `publish_rejected` the **QoS 1** publishes the broker refused (the status and info messages). MQTT gives no reply to a QoS 0
+publish, so measurements the broker refuses are dropped **without being counted**. A non-zero `publish_rejected` means the permissions
+are wrong and data is probably being lost; the bridge also checks its first message at start-up and stops if the broker refuses it. All counts are since the bridge started.

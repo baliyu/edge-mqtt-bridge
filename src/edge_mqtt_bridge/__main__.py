@@ -49,6 +49,13 @@ def build_parser() -> argparse.ArgumentParser:
     return ap
 
 
+def final_summary(bridge) -> str:
+    """The one line printed when the bridge stops: what it accepted and dropped, and what the broker refused."""
+    c = bridge.filter.counters
+    return (f"Stopped. windows accepted {c.accepted}, duplicates {c.duplicates}, restarts {c.restarts}, stale {c.stale}, bad {c.bad}, "
+            f"publish failures {bridge.publish_failures}, refused by the broker {getattr(bridge.pub, 'rejected', 0)}")
+
+
 def cmd_run(a) -> int:
     try:
         import serial
@@ -62,6 +69,12 @@ def cmd_run(a) -> int:
         pub.connect()
     except ConnectionError as e:
         print(e, file=sys.stderr)
+        return 1
+    if pub.status_accepted() is False:
+        print(f"The broker refused the bridge's first message, so this user probably may not write {t['status']} (or anything under "
+              f"{a.prefix}/{a.device}/). Nothing would reach the broker: stopping. Check the user, the --device name and the broker's permission file.",
+              file=sys.stderr)
+        pub.close()
         return 1
     try:
         ser = serial.Serial(a.serial_port, a.baud, timeout=0.5)
@@ -78,9 +91,7 @@ def cmd_run(a) -> int:
         bridge.run(ser, should_stop=lambda: stop["now"])
     time.sleep(0.2)          # let the last messages leave
     pub.close()
-    c = bridge.filter.counters
-    print(f"Stopped. windows accepted {c.accepted}, duplicates {c.duplicates}, restarts {c.restarts}, "
-          f"stale {c.stale}, bad {c.bad}, publish failures {bridge.publish_failures}")
+    print(final_summary(bridge))
     return 0
 
 

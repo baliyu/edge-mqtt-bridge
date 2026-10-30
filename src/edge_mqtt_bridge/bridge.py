@@ -110,17 +110,31 @@ class PahoPublisher:
         self.host, self.port = host, port
         self.connected = False
         self.last_reason = ""
-        self.rejected = 0            # publishes the broker refused (for example no permission for that topic)
+        self.rejected = 0            # QoS 1 publishes the broker refused (QoS 0 publishes get no reply, so a refusal of those is invisible)
+        self._online_mid = None      # the message id of the 'online' status message, to learn at once whether the broker accepted it
+        self.online_accepted = None  # None until the broker has answered
 
     def _on_connect(self, client, userdata, flags, reason_code, properties):
         self.connected = not reason_code.is_failure
         self.last_reason = str(reason_code)
         if self.connected:
-            client.publish(self._status_topic, "online", qos=1, retain=True)
+            self.online_accepted = None
+            self._online_mid = client.publish(self._status_topic, "online", qos=1, retain=True).mid
 
     def _on_publish(self, client, userdata, mid, reason_code, properties):
         if reason_code.is_failure:
             self.rejected += 1
+        if mid == self._online_mid:
+            self.online_accepted = not reason_code.is_failure
+
+    def status_accepted(self, timeout: float = 3.0):
+        """True if the broker accepted the 'online' status message, False if it refused it (usually: this user may not write that
+        topic), None if no answer came in time. A QoS 0 measurement message that is refused gets no reply at all, so this check is the
+        way a wrong permission is noticed before data is silently dropped."""
+        end = time.monotonic() + timeout
+        while self.online_accepted is None and time.monotonic() < end:
+            time.sleep(0.02)
+        return self.online_accepted
 
     def connect(self, timeout: float = 10.0) -> None:
         self.client.connect(self.host, self.port, keepalive=30)

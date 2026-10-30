@@ -12,9 +12,9 @@ Built with AI assistance (Claude). I chose the design, ran it on my own hardware
 ## Status, stated plainly
 
 - Tested with a fake serial port and a fake MQTT client, and against a **real Mosquitto broker** (the integration tests start one on a private port and are skipped if Mosquitto is not installed). CI runs both.
-- The tests were checked by breaking the code on purpose: 12 deliberate bugs in the bridge and 6 in the security behaviour, each caught. One of my own security tests turned out to be vacuous (two clients shared an ID) until that check exposed it; it is fixed.
-- Run against a real board: yes, in two short runs (below). They show it works; they are not a long-run test.
-- **Users, passwords and per-topic permissions are supported and tested against a real broker** (see [docs/SECURITY.md](docs/SECURITY.md)): the bridge user can write only its own device's topics, a reader can only read, and the bridge counts the publishes the broker refuses.
+- The tests were checked by breaking the code on purpose: 12 deliberate bugs in the bridge and 8 in the security behaviour, each caught. One of my own security tests turned out to be vacuous (two clients shared an ID) until that check exposed it; it is fixed.
+- Run against a real board: yes, in four short runs (below). They show it works; they are not a long-run test.
+- **Users, passwords and per-topic permissions are supported and tested against a real broker** (see [docs/SECURITY.md](docs/SECURITY.md)): the bridge user can write only its own device's topics, a reader can only read, and at start-up the bridge stops with a clear error if the broker refuses its first message.
 - **No TLS yet.** Passwords and messages cross the network as plain text, so keep the broker on `127.0.0.1` until TLS is added (the next step, below).
 - One device, one message format. No cloud, no database, no dashboard.
 
@@ -37,12 +37,14 @@ Stop the bridge with Ctrl+C: it publishes `offline` (retained) before it exits. 
 
 ## Run on a real board
 
-One SparkFun Edge running the mic_logger firmware, on a Windows 11 laptop; the broker was Mosquitto 2.0.18 in WSL2 on the same laptop, reached from the bridge on Windows as `localhost`. Two short runs on 30 October 2026:
+One SparkFun Edge running the mic_logger firmware, on a Windows 11 laptop; the broker was Mosquitto 2.0.18 in WSL2 on the same laptop, reached from the bridge on Windows as `localhost`. Four short runs on 30 October 2026:
 
 | Run | What happened |
 |---|---|
 | 1 | 69 windows read and published; 0 duplicates, 0 restarts, 0 stale or bad lines, 0 publish failures. `status` went `online`, then `offline` (retained) after Ctrl+C. The 69 messages arrived about 0.254 s apart on average, which is the board's own window rate (2000 samples at about 7878 Hz), so the bridge showed no visible delay in the stream |
 | 2 | The bridge accepted 159 windows (1 stale line dropped: the bytes Windows hands over when a port is opened; 0 bad lines, 0 publish failures). `check` read 81 of the messages in another window and found 0 problems and 0 board restarts |
+| 3 | The same laptop with the broker secured (users `bridge` and `reader`, the permission file in `docs/`). An anonymous publish was refused ("not authorised", exit code 5). The bridge, as `bridge`, accepted 91 windows with 0 publish failures; `check`, as the read-only `reader`, read 41 messages and found 0 problems. The passwords used in this run were short, which is acceptable only because the broker listens on `127.0.0.1` |
+| 4 | Three refusal tests on the secured broker. No password: refused ("Not authorized"). A wrong password: refused, and the message did not contain it. The bridge run as another device (`--device other-device`): it connected and read 132 windows, but the broker refused only the two QoS 1 status messages; the QoS 0 measurements were dropped silently and the bridge could not tell. That gap was found by this run, and the bridge now checks its first message and stops (see `docs/SECURITY.md`). The serial port also handed over a stale block of 2,384 repeated lines, which the filter dropped |
 
 Not measured: end-to-end latency, behaviour over hours, behaviour when the broker is stopped or restarted mid-run, or a second device.
 

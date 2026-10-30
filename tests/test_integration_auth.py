@@ -146,3 +146,27 @@ def test_a_topic_the_user_may_not_read_just_stays_silent_and_the_check_command_s
 def test_the_checker_says_when_the_broker_refuses_its_password(broker):
     checker, error = run_check("127.0.0.1", broker, "edge/+/mic", 5, 5, "reader", "wrong")
     assert error is not None and "refused the connection" in error
+
+
+def test_the_bridge_notices_at_once_that_it_may_not_write_its_topics(broker):
+    other = PahoPublisher("127.0.0.1", broker, "bridge-other", topics("edge", "other-device")["status"], username="bridge", password=USERS["bridge"])
+    other.connect()
+    assert other.status_accepted(timeout=5) is False        # the 'online' message to edge/other-device/status is refused
+    own = PahoPublisher("127.0.0.1", broker, "bridge-own", topics("edge", "edge-1")["status"], username="bridge", password=USERS["bridge"])
+    own.connect()
+    assert own.status_accepted(timeout=5) is True
+    for q in (other, own):
+        q.close()
+
+
+def test_a_refused_measurement_at_qos_0_is_invisible_to_the_publisher(broker):
+    """Documented limit: MQTT gives no reply to a QoS 0 publish, so the broker can drop it without the client ever knowing."""
+    p = PahoPublisher("127.0.0.1", broker, "bridge-qos0", topics("edge", "edge-1")["status"], username="bridge", password=USERS["bridge"])
+    p.connect()
+    assert p.status_accepted(timeout=5) is True
+    before = p.rejected
+    for _ in range(5):
+        p.publish("edge/other-device/mic", "{}", qos=0)          # not allowed: dropped silently
+    time.sleep(1.0)
+    assert p.rejected == before                                    # nothing was reported
+    p.close()

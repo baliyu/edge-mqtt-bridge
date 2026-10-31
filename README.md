@@ -12,10 +12,10 @@ Built with AI assistance (Claude). I chose the design, ran it on my own hardware
 ## Status, stated plainly
 
 - Tested with a fake serial port and a fake MQTT client, and against a **real Mosquitto broker** (the integration tests start one on a private port and are skipped if Mosquitto is not installed). CI runs both.
-- The tests were checked by breaking the code on purpose: 12 deliberate bugs in the bridge, 8 in the security behaviour and 10 in the TLS behaviour, each caught. One of my own security tests turned out to be vacuous (two clients shared an ID) until that check exposed it; it is fixed.
-- Run against a real board: yes, in four short runs (below). They show it works; they are not a long-run test.
+- The tests were checked by breaking the code on purpose: 12 deliberate bugs in the bridge, 8 in the security behaviour and 12 in the TLS behaviour, each caught. One of my own security tests turned out to be vacuous (two clients shared an ID) until that check exposed it; it is fixed.
+- Run against a real board: yes, in five short runs (below). They show it works; they are not a long-run test.
 - **Users, passwords and per-topic permissions are supported and tested against a real broker** (see [docs/SECURITY.md](docs/SECURITY.md)): the bridge user can write only its own device's topics, a reader can only read, and at start-up the bridge stops with a clear error if the broker refuses its first message.
-- **TLS is supported and tested against a real broker** (`--mqtt-tls-ca`): the bridge checks the broker's certificate and name, trusts only the authority you name, and refuses TLS older than 1.2. It is optional: without it nothing is encrypted, so keep the broker on `127.0.0.1`. It has **not yet been run on the real board**. No client certificates (the password is the only client credential).
+- **TLS is supported and tested against a real broker** (`--mqtt-tls-ca`): the bridge checks the broker's certificate and name, trusts only the authority you name, and refuses TLS older than 1.2. It is optional: without it nothing is encrypted, so keep the broker on `127.0.0.1`. It has also been run on the real board (run 5). No client certificates (the password is the only client credential).
 - One device, one message format. No cloud, no database, no dashboard.
 
 ## Quick start
@@ -37,7 +37,7 @@ Stop the bridge with Ctrl+C: it publishes `offline` (retained) before it exits. 
 
 ## Run on a real board
 
-One SparkFun Edge running the mic_logger firmware, on a Windows 11 laptop; the broker was Mosquitto 2.0.18 in WSL2 on the same laptop, reached from the bridge on Windows as `localhost`. Four short runs on 30 October 2026:
+One SparkFun Edge running the mic_logger firmware, on a Windows 11 laptop; the broker was Mosquitto 2.0.18 in WSL2 on the same laptop, reached from the bridge on Windows as `localhost`. Five short runs on 30 October 2026:
 
 | Run | What happened |
 |---|---|
@@ -45,6 +45,7 @@ One SparkFun Edge running the mic_logger firmware, on a Windows 11 laptop; the b
 | 2 | The bridge accepted 159 windows (1 stale line dropped: the bytes Windows hands over when a port is opened; 0 bad lines, 0 publish failures). `check` read 81 of the messages in another window and found 0 problems and 0 board restarts |
 | 3 | The same laptop with the broker secured (users `bridge` and `reader`, the permission file in `docs/`). An anonymous publish was refused ("not authorised", exit code 5). The bridge, as `bridge`, accepted 91 windows with 0 publish failures; `check`, as the read-only `reader`, read 41 messages and found 0 problems. The passwords used in this run were short, which is acceptable only because the broker listens on `127.0.0.1` |
 | 4 | Three refusal tests on the secured broker. No password: refused ("Not authorized"). A wrong password: refused, and the message did not contain it. The bridge run as another device (`--device other-device`): it connected and read 132 windows, but the broker refused only the two QoS 1 status messages; the QoS 0 measurements were dropped silently and the bridge could not tell. That gap was found by this run, and the bridge now checks its first message and stops (see `docs/SECURITY.md`). The serial port also handed over a stale block of 2,384 repeated lines, which the filter dropped |
+| 5 | TLS on the real broker: certificates made by `docs/make-certs.sh`, port 8883 only, and the plain-text port closed (checked with `ss`). The bridge, as `bridge`, accepted 123 windows over TLS with 0 publish failures and 0 refusals; `check`, as the read-only `reader`, read 41 messages and found 0 problems; `check` without the authority file never got an MQTT session and said so. **The first attempt failed:** Python 3.13 refused my certificate authority because it did not declare that it may sign certificates. My tests and CI ran Python 3.12, which does not check that, so only the real run found it. The script is fixed, the client now applies the strict rules on every Python version, and CI runs 3.12 and 3.13 (see `docs/SECURITY.md`) |
 
 Not measured: end-to-end latency, behaviour over hours, behaviour when the broker is stopped or restarted mid-run, or a second device.
 

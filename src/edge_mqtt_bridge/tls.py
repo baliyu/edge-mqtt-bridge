@@ -8,10 +8,11 @@ LOCAL_HOSTS = {"localhost", "127.0.0.1", "::1"}
 
 
 def make_context(ca_file: str) -> ssl.SSLContext:
-    """A client context that trusts ONLY the given authority (not the system's list), checks the certificate's hostname, and
-    refuses anything older than TLS 1.2."""
+    """A client context that trusts ONLY the given authority (not the system's list), checks the certificate's hostname, applies the strict
+    X.509 rules (an authority must say it may sign certificates), and refuses anything older than TLS 1.2."""
     ctx = ssl.create_default_context(ssl.Purpose.SERVER_AUTH, cafile=ca_file)
     ctx.minimum_version = ssl.TLSVersion.TLSv1_2
+    ctx.verify_flags |= ssl.VERIFY_X509_STRICT        # on by default only since Python 3.13; set it so every version checks the same way
     assert ctx.verify_mode == ssl.CERT_REQUIRED and ctx.check_hostname       # create_default_context sets these; fail loudly if that ever changes
     return ctx
 

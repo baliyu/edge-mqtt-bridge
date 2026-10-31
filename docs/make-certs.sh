@@ -11,10 +11,13 @@ mkdir -p "$OUT"
 cd "$OUT"
 umask 077
 openssl genrsa -out ca.key 3072 2>/dev/null
-openssl req -x509 -new -key ca.key -sha256 -days "$DAYS" -subj "/CN=edge-mqtt-bridge private CA" -out ca.crt
+# The authority must say that it may sign certificates (basicConstraints + keyUsage). Python 3.13 and newer refuse an authority without them.
+openssl req -x509 -new -key ca.key -sha256 -days "$DAYS" -subj "/CN=edge-mqtt-bridge private CA" \
+  -addext "basicConstraints=critical,CA:TRUE,pathlen:0" -addext "keyUsage=critical,keyCertSign,cRLSign" \
+  -addext "subjectKeyIdentifier=hash" -out ca.crt
 openssl genrsa -out server.key 3072 2>/dev/null
 openssl req -new -key server.key -subj "/CN=edge-broker" -out server.csr
-printf 'subjectAltName=%s\nbasicConstraints=CA:FALSE\nkeyUsage=digitalSignature,keyEncipherment\nextendedKeyUsage=serverAuth\n' "$SAN" > server.ext
+printf 'subjectAltName=%s\nbasicConstraints=critical,CA:FALSE\nkeyUsage=critical,digitalSignature,keyEncipherment\nextendedKeyUsage=serverAuth\nsubjectKeyIdentifier=hash\nauthorityKeyIdentifier=keyid\n' "$SAN" > server.ext
 openssl x509 -req -in server.csr -CA ca.crt -CAkey ca.key -CAcreateserial -out server.crt -days "$DAYS" -sha256 -extfile server.ext 2>/dev/null
 rm -f server.csr server.ext ca.srl
 chmod 644 ca.crt server.crt

@@ -149,6 +149,7 @@ def test_the_context_trusts_only_the_named_authority_and_demands_a_name_and_tls_
     assert ctx.verify_mode == ssl.CERT_REQUIRED and ctx.check_hostname
     assert ctx.minimum_version >= ssl.TLSVersion.TLSv1_2
     assert len(ctx.get_ca_certs()) == 1                                   # only our authority, not the system's list
+    assert ctx.verify_flags & ssl.VERIFY_X509_STRICT                      # strict on every Python version, as Python 3.13 does by default
 
 
 def test_a_password_sent_without_tls_to_another_machine_gets_a_warning():
